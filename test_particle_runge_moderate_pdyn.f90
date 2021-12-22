@@ -8,7 +8,8 @@
 		integer*4 line,stat
 		real*8 f,x(4),y(4),z(4),bx(4),by(4),bz(4),vx(4),vy(4),vz(4),r(1),bt(1),kx(4),ky(4),kz(4),bxz(1)
 		real*8 m,m_electron,m_proton,delta_t,c,q,Kinect_Energy,Pitch_Angle,Velocity,Current_Energy
-		real*8 Current_mu,Initial_mu,Current_Pitch
+		real*8 Current_mu,Initial_mu,Current_Pitch,Gyro_Angle
+		real*8 grav
 		integer*4 i,j,k
 		include 'kt17_common.f90'
 		include 'kt17_param.f90'
@@ -23,103 +24,120 @@
 		print *,rss
 		tamp1=6.4950+0.0229*act
 		tamp2=1.6245+0.0088*act
-		delta_t=1.00d-3
 		m_electron=9.1d-31!kg
 		m_proton=1.67d-27!kg
 		q=1.6d-19!C
 		c=3.0d8!m/s
+		grav=3.7!m/s^2
 		m=m_proton
 		Current_Energy=0.0d0
 		Kinect_Energy=5d3*(1.6d-19)!(eV to)Joule
 		Pitch_Angle=50.0d0!degree
+		Gyro_Angle=-45.0d0!degree, angle between vx and vy
 		Velocity=c*sqrt(1-(m**2)*(c**4)/((m*(c**2)+Kinect_Energy)**2))
 		call kt17_bfield(1,x(1),y(1),z(1),bx(1),by(1),bz(1))!determine the magnetic field line vector
 		bt(1)=sqrt(bx(1)**2+by(1)**2+bz(1)**2)
 		bxz(1)=sqrt(bx(1)**2+bz(1)**2)
-		!assume the particle's velocity's y components is 0.
+		!assume the particle's velocity's y component is 0.
 		vx(1)=Velocity*&
 		(cos(Pitch_Angle*4*atan(1.0d0)/180)*bxz(1)*bx(1)+&
 		sqrt(bz(1)**4+(bz(1)*bx(1))**2-&
 		(cos(Pitch_Angle*4*atan(1.0d0)/180)*bxz(1)*bz(1))**2))/&
-		(bx(1)**2+bz(1)**2)
-		vy(1)=0.0d0
-		vz(1)=sqrt(Velocity**2-vx(1)**2)
+		(bx(1)**2+bz(1)**2)*cos(Gyro_Angle*4*atan(1.0d0)/180)
+		vy(1)=vx(1)*tan(Gyro_Angle*4*atan(1.0d0)/180)
+		vz(1)=sqrt(Velocity**2-vx(1)**2-vy(1)**2)
 		
 		print *,vx(1),vy(1),vz(1)
 		Initial_mu=m*(vx(1)**2+vy(1)**2+vz(1)**2-((bx(1)*vx(1)+by(1)*vy(1)+bz(1)*vz(1))/bt(1))**2)/(bt(1)*1d-9*(2)*1.6d-19)
-		open(1,file="KT17_test_particle_result_moderate_pdyn.txt",status='new')
+		open(1,file="KT17_test_particle_result_moderate_pdyn.txt",status='old')
 		do i=1,5000000
 			Current_Energy=m*(vx(1)**2+vy(1)**2+vz(1)**2)/(2*1.6d-19)
 			Current_mu=m*(vx(1)**2+vy(1)**2+vz(1)**2-((bx(1)*vx(1)+by(1)*vy(1)+bz(1)*vz(1))/bt(1))**2)/(bt(1)*1d-9*(2)*1.6d-19)/Initial_mu
 			Current_Pitch=acos(((bx(1)*vx(1)+by(1)*vy(1)+bz(1)*vz(1))/(bt(1)*sqrt(vx(1)**2+vy(1)**2+vz(1)**2))))*180/(3.1415926)
-			print *,x(1),y(1),z(1),bt(1),Current_mu,Current_Energy
-			do j=1,1
-				delta_t=0.6558/bt(1) !0.1% of gyro-period
-				write(1,*) x(1),y(1),z(1),Current_mu,Current_Energy
+			print *,x(1),y(1),z(1),vx(1)/1e3,vy(1)/1e3,vz(1)/1e3,bx(1),by(1),bz(1),Current_mu,Current_Energy
+			write(1,*) x(1),y(1),z(1),bt(1),Current_mu,Current_Energy
+			do j=1,1 !output per 1 step
+				!write(1,*) x(1),y(1),z(1),vx(1)/1e3,vy(1)/1e3,vz(1)/1e3,bx(1),by(1),bz(1),Current_mu,Current_Energy
 				call kt17_bfield(1,x(1),y(1),z(1),bx(1),by(1),bz(1))
 				
-				kx(1)=(vy(1)*bz(1)-vz(1)*by(1))*q/(1d9*m)
-				ky(1)=(vz(1)*bx(1)-vx(1)*bz(1))*q/(1d9*m)
-				kz(1)=(vx(1)*by(1)-vy(1)*bx(1))*q/(1d9*m)
+				r=sqrt(x(1)**2+y(1)**2+(z(1)+0.196)**2)
+				bt=sqrt(bx(1)**2+by(1)**2+bz(1)**2)
+				
+				delta_t=0.06558/bt(1) !0.1% of gyro-period
+				
+				kx(1)=(vy(1)*bz(1)-vz(1)*by(1))*q/(1d9*m) - grav * x(1) / (r(1)**3)
+				ky(1)=(vz(1)*bx(1)-vx(1)*bz(1))*q/(1d9*m) - grav * y(1) / (r(1)**3)
+				kz(1)=(vx(1)*by(1)-vy(1)*bx(1))*q/(1d9*m) - grav * (z(1)+0.196) / (r(1)**3)
 				
 				vx(2)=vx(1)+kx(1)*delta_t/2
 				vy(2)=vy(1)+ky(1)*delta_t/2
 				vz(2)=vz(1)+kz(1)*delta_t/2
 				
-				x(2)=x(1)+vx(1)*delta_t/(2*2439d3)
-				y(2)=y(1)+vy(1)*delta_t/(2*2439d3)
-				z(2)=z(1)+vz(1)*delta_t/(2*2439d3)
+				x(2)=x(1)+vx(1)*delta_t/(2*2440d3)
+				y(2)=y(1)+vy(1)*delta_t/(2*2440d3)
+				z(2)=z(1)+vz(1)*delta_t/(2*2440d3)
 				
 				call kt17_bfield(1,x(2),y(2),z(2),bx(2),by(2),bz(2))
 				
-				kx(2)=(vy(2)*bz(2)-vz(2)*by(2))*q/(1d9*m)
-				ky(2)=(vz(2)*bx(2)-vx(2)*bz(2))*q/(1d9*m)
-				kz(2)=(vx(2)*by(2)-vy(2)*bx(2))*q/(1d9*m)
+				kx(2)=(vy(2)*bz(2)-vz(2)*by(2))*q/(1d9*m) - grav * x(2) / (r(1)**3)
+				ky(2)=(vz(2)*bx(2)-vx(2)*bz(2))*q/(1d9*m) - grav * y(2) / (r(1)**3)
+				kz(2)=(vx(2)*by(2)-vy(2)*bx(2))*q/(1d9*m) - grav * (z(2)+0.196) / (r(1)**3)
 				
 				vx(3)=vx(1)+kx(2)*delta_t/2
 				vy(3)=vy(1)+ky(2)*delta_t/2
 				vz(3)=vz(1)+kz(2)*delta_t/2
 				
-				x(3)=x(1)+vx(2)*delta_t/(2*2439d3)
-				y(3)=y(1)+vy(2)*delta_t/(2*2439d3)
-				z(3)=z(1)+vz(2)*delta_t/(2*2439d3)
+				x(3)=x(1)+vx(2)*delta_t/(2*2440d3)
+				y(3)=y(1)+vy(2)*delta_t/(2*2440d3)
+				z(3)=z(1)+vz(2)*delta_t/(2*2440d3)
 				
 				call kt17_bfield(1,x(3),y(3),z(3),bx(3),by(3),bz(3))
 				
-				kx(3)=(vy(3)*bz(3)-vz(3)*by(3))*q/(1d9*m)
-				ky(3)=(vz(3)*bx(3)-vx(3)*bz(3))*q/(1d9*m)
-				kz(3)=(vx(3)*by(3)-vy(3)*bx(3))*q/(1d9*m)
+				kx(3)=(vy(3)*bz(3)-vz(3)*by(3))*q/(1d9*m) - grav * x(3) / (r(1)**3)
+				ky(3)=(vz(3)*bx(3)-vx(3)*bz(3))*q/(1d9*m) - grav * y(3) / (r(1)**3)
+				kz(3)=(vx(3)*by(3)-vy(3)*bx(3))*q/(1d9*m) - grav * (z(3)+0.196) / (r(1)**3)
 				
 				vx(4)=vx(1)+kx(3)*delta_t
 				vy(4)=vy(1)+ky(3)*delta_t
 				vz(4)=vz(1)+kz(3)*delta_t
 				
-				x(4)=x(1)+vx(3)*delta_t/(2439d3)
-				y(4)=y(1)+vy(3)*delta_t/(2439d3)
-				z(4)=z(1)+vz(3)*delta_t/(2439d3)
+				x(4)=x(1)+vx(3)*delta_t/(2440d3)
+				y(4)=y(1)+vy(3)*delta_t/(2440d3)
+				z(4)=z(1)+vz(3)*delta_t/(2440d3)
 				
 				call kt17_bfield(1,x(4),y(4),z(4),bx(4),by(4),bz(4))
 				
-				kx(4)=(vy(4)*bz(4)-vz(4)*by(4))*q/(1d9*m)
-				ky(4)=(vz(4)*bx(4)-vx(4)*bz(4))*q/(1d9*m)
-				kz(4)=(vx(4)*by(4)-vy(4)*bx(4))*q/(1d9*m)
+				kx(4)=(vy(4)*bz(4)-vz(4)*by(4))*q/(1d9*m) - grav * x(4) / (r(1)**3)
+				ky(4)=(vz(4)*bx(4)-vx(4)*bz(4))*q/(1d9*m) - grav * y(4) / (r(1)**3)
+				kz(4)=(vx(4)*by(4)-vy(4)*bx(4))*q/(1d9*m) - grav * (z(4)+0.196) / (r(1)**3)
 				
-				x(1)=x(1)+(vx(1)+2*vx(2)+2*vx(3)+vx(4))*delta_t/(6*2439d3)
-				y(1)=y(1)+(vy(1)+2*vy(2)+2*vy(3)+vy(4))*delta_t/(6*2439d3)
-				z(1)=z(1)+(vz(1)+2*vz(2)+2*vz(3)+vz(4))*delta_t/(6*2439d3)
+				x(1)=x(1)+(vx(1)+2*vx(2)+2*vx(3)+vx(4))*delta_t/(6*2440d3)
+				y(1)=y(1)+(vy(1)+2*vy(2)+2*vy(3)+vy(4))*delta_t/(6*2440d3)
+				z(1)=z(1)+(vz(1)+2*vz(2)+2*vz(3)+vz(4))*delta_t/(6*2440d3)
 				
 				vx(1)=vx(1)+delta_t/(6)*(kx(1)+2*kx(2)+2*kx(3)+kx(4))
 				vy(1)=vy(1)+delta_t/(6)*(ky(1)+2*ky(2)+2*ky(3)+ky(4))
 				vz(1)=vz(1)+delta_t/(6)*(kz(1)+2*kz(2)+2*kz(3)+kz(4))
 				
 				
-				r=sqrt(x(1)**2+y(1)**2+(z(1)+0.2)**2)
-				bt=sqrt(bx(1)**2+by(1)**2+bz(1)**2)
 				if((bx(1)**2 .lt. 1.0d-3) .and. (by(1)**2 .lt. 1.0d-3) .and. (bz(1)**2 .lt. 1.0d-3)) then
 					print *,"magnetopause shadowing"
 					exit
 				end if
-				if(x(1)**2+y(1)**2+(z(1)+0.2)**2 .lt. 1.0d0) then
+				if((bx(2)**2 .lt. 1.0d-3) .and. (by(2)**2 .lt. 1.0d-3) .and. (bz(2)**2 .lt. 1.0d-3)) then
+					print *,"magnetopause shadowing"
+					exit
+				end if
+				if((bx(3)**2 .lt. 1.0d-3) .and. (by(3)**2 .lt. 1.0d-3) .and. (bz(3)**2 .lt. 1.0d-3)) then
+					print *,"magnetopause shadowing"
+					exit
+				end if
+				if((bx(4)**2 .lt. 1.0d-3) .and. (by(4)**2 .lt. 1.0d-3) .and. (bz(4)**2 .lt. 1.0d-3)) then
+					print *,"magnetopause shadowing"
+					exit
+				end if
+				
+				if(x(1)**2+y(1)**2+(z(1)+0.196)**2 .lt. 1.0d0) then
 					print *,"loss cone,solid planet"
 					exit
 				end if
@@ -127,7 +145,7 @@
 			if((bx(1)**2 .lt. 1.0d-3) .and. (by(1)**2 .lt. 1.0d-3) .and. (bz(1)**2 .lt. 1.0d-3)) then
 				exit
 			end if
-			if(x(1)**2+y(1)**2+(z(1)+0.2)**2 .lt. 1.0d0) then
+			if(x(1)**2+y(1)**2+(z(1)+0.196)**2 .lt. 1.0d0) then
 				exit
 			end if
 		end do
